@@ -97,6 +97,7 @@ async def fetch_subscription(
     try:
         sub = await client.get(f'{sub_link}{sub_id}', timeout=3)
         sub.raise_for_status()
+        logger.info(f"Headers from {sub_link}: {dict(sub.headers)}")
         return base64.b64decode(sub.text), dict(sub.headers)
     except httpx.HTTPError as e:
         logger.warning(f"Can't get subscription from {sub_link}{sub_id}: {str(e)}")
@@ -126,8 +127,8 @@ async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -
         merged_headers = {}
         if headers_list:
             first_headers = headers_list[0]
-            # copy relevant subscription headers
-            for key in ['subscription-userinfo', 'profile-update-interval', 'content-disposition', 'profile-web-page-url']:
+            # copy relevant subscription headers (EXCLUDING profile-title since we'll set it ourselves)
+            for key in ['subscription-userinfo', 'profile-update-interval', 'profile-web-page-url']:
                 if key in first_headers:
                     merged_headers[key] = first_headers[key]
 
@@ -151,6 +152,11 @@ async def main(sub_id: str = "") -> Response:
 
     result, headers = await merge_all(sub_links, vless_links, sub_id)
     global_sub = base64.b64encode(result)
+
+    sub_name = os.getenv('SUB_NAME', 'service')
+    headers['profile-title'] = sub_name
+    headers['content-disposition'] = f'attachment; filename="{sub_name}"'
+
 
     return Response(
         content=global_sub,

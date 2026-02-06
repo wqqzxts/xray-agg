@@ -19,11 +19,23 @@ http {
         location ~ ^/${URL}/(.+)$ {
 	    proxy_pass http://app:8000/${URL}/$1;
 	    proxy_set_header Host $host;
+
+	    proxy_pass_header subscription-userinfo;
+            proxy_pass_header profile-update-interval;
+            proxy_pass_header content-disposition;
+            proxy_pass_header profile-web-page-url;
+            proxy_pass_header profile-title;
 	}
 
 	location = /${URL} {
 	    proxy_pass http://app:8000/${URL};
 	    proxy_set_header Host $host;
+
+	    proxy_pass_header subscription-userinfo;
+            proxy_pass_header profile-update-interval;
+            proxy_pass_header content-disposition;
+            proxy_pass_header profile-web-page-url;
+            proxy_pass_header profile-title;
 	}
     }
 }
