@@ -1,0 +1,32 @@
+services:
+  app:
+    build: ./app
+    env_file:
+      - .env
+    volumes:
+      - ${FILE_PATH}:/app/configs.txt
+    restart: unless-stopped
+    networks:
+      - obie-net
+
+  nginx:
+    build: ./nginx
+    env_file:
+      - .env
+    ports:
+      - ${PORT}:${PORT}
+    environment:
+      - SERVER_NAME=${SERVER_NAME}
+      - URL=${URL}
+    volumes:
+      - ${CERT_PATH}/fullchain.pem:/etc/nginx/ssl/fullchain.pem
+      - ${CERT_PATH}/privkey.pem:/etc/nginx/ssl/privkey.pem
+    restart: unless-stopped
+    depends_on:
+      - app
+    networks:
+      - obie-net
+
+networks:
+  obie-net:
+    driver: bridge

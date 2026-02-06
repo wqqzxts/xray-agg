@@ -1,0 +1,29 @@
+worker_processes auto;
+events {
+    worker_connections 4096;
+    multi_accept on;
+}
+
+http {
+    tcp_nodelay on;
+    include mime.types;
+    default_type text/plain;
+
+    server {
+        listen ${PORT} ssl;
+        server_name ${SERVER_NAME};
+
+        ssl_certificate /etc/nginx/ssl/fullchain.pem;
+        ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+
+        location ~ ^/${URL}/(.+)$ {
+	    proxy_pass http://app:8000/${URL}/$1;
+	    proxy_set_header Host $host;
+	}
+
+	location = /${URL} {
+	    proxy_pass http://app:8000/${URL};
+	    proxy_set_header Host $host;
+	}
+    }
+}
