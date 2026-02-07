@@ -105,7 +105,35 @@ async def fetch_subscription(
         logger.warning(f"Can't get subscription from {sub_link}{sub_id}: {str(e)}")
         return None
 
-def clean_link_name(link: str) -> str:
+def format_bytes(bytes_value: int) -> str:
+    '''Convert bytes to human-readable format (GB, MB, KB)'''
+    if bytes_value >= 1_073_741_824:  # >= 1GB
+        return f"{bytes_value / 1_073_741_824:.2f}GB"
+    elif bytes_value >= 1_048_576:  # >= 1MB
+        return f"{bytes_value / 1_048_576:.2f}MB"
+    elif bytes_value >= 1024:  # >= 1KB
+        return f"{bytes_value / 1024:.2f}KB"
+    else:
+        return f"{bytes_value}B"
+
+def parse_traffic_from_userinfo(userinfo: str) -> str:
+    '''
+    Parse subscription-userinfo header and return formatted traffic string.
+    Example input: 'upload=235205700; download=1883111384; total=0; expire=0'
+    Example output: '↑235.21MB ↓1.88GB'
+    '''
+    try:
+        parts = dict(item.split('=') for item in userinfo.split('; '))
+        download = int(parts.get('download', 0))
+        
+        download_str = format_bytes(download)
+        
+        return f"↓{download_str}"
+    except Exception as e:
+        logger.warning(f"Failed to parse userinfo: {e}")
+        return ""
+
+def clean_link_name(link: str, traffic_suffix: str = "") -> str:
     '''
     Remove email suffix from VLESS/VMess/Trojan link fragments.
     Keeps emoji and inbound name, removes the email part.
@@ -124,6 +152,9 @@ def clean_link_name(link: str) -> str:
         # remove email pattern
         cleaned = re.sub(r'-[a-zA-Z0-9]+(?:-[\dDHM,]+)?(?:⏳|⌛)?$', '', decoded_fragment)
 
+        if traffic_suffix:
+            cleaned = f"{cleaned} {traffic_suffix}"
+
         logger.info(f"After cleaning: {cleaned}")
         
         # re-encode and rebuild the link
@@ -133,6 +164,7 @@ def clean_link_name(link: str) -> str:
     except Exception as e:
         logger.warning(f"Failed to clean link name: {e}")
         return link
+
 
 async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -> tuple[bytes, dict]:
     '''
@@ -151,27 +183,31 @@ async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -
             raise HTTPException(status_code=500, detail="There is nothing to return")
 
         # extract content and headers
-        data = [content for content, _ in valid_results] if valid_results else []
-        headers_list = [headers for _, headers in valid_results] if valid_results else []
+        data_with_headers = [(content, headers) for content, headers in valid_results] if valid_results else []
 
-        # merge subscription metadata from first available source
+        # merge subscription metadata from first available source (for global headers)
         merged_headers = {}
-        if headers_list:
-            first_headers = headers_list[0]
-            # copy relevant subscription headers (EXCLUDING profile-title since we'll set it ourselves)
+        if data_with_headers:
+            first_headers = data_with_headers[0][1]
             for key in ['subscription-userinfo', 'profile-update-interval', 'profile-web-page-url']:
                 if key in first_headers:
                     merged_headers[key] = first_headers[key]
 
-        # clean email from profile
+        # clean email from profile and add traffic info per VPS
         cleaned_data = []
-        for content in data:
+        for content, headers in data_with_headers:
+            traffic_suffix = ""
+            if 'subscription-userinfo' in headers:
+                traffic_suffix = parse_traffic_from_userinfo(headers['subscription-userinfo'])
+            
             lines = content.decode('utf-8').splitlines()
-            cleaned_lines = [clean_link_name(line) for line in lines]
+            cleaned_lines = [clean_link_name(line, traffic_suffix) for line in lines]
             cleaned_data.append('\n'.join(cleaned_lines).encode('utf-8'))
+
+
+        vless_traffic_suffix = ""
         
-        # clean vless links
-        cleaned_vless = [clean_link_name(link).encode() for link in vless_links]
+        cleaned_vless = [clean_link_name(link, vless_traffic_suffix).encode() for link in vless_links]
 
         # merge content
         merged_subs = b'\n'.join(cleaned_data) if cleaned_data else b''
