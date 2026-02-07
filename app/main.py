@@ -118,9 +118,13 @@ def clean_link_name(link: str) -> str:
         
         fragment = link[hash_idx + 1:]
         decoded_fragment = unquote(fragment)
+
+        logger.info(f"Before cleaning: {decoded_fragment}")
         
-        # remove email pattern: "-emailpart" at the end
-        cleaned = re.sub(r'-[a-zA-Z0-9@.]+$', '', decoded_fragment)
+        # remove email pattern
+        cleaned = re.sub(r'-[a-zA-Z0-9]+(?:-[\dDHM,]+)?(?:⏳|⌛)?$', '', decoded_fragment)
+
+        logger.info(f"After cleaning: {cleaned}")
         
         # re-encode and rebuild the link
         encoded_fragment = quote(cleaned, safe='')
