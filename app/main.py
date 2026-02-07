@@ -50,7 +50,7 @@ async def fetch_links() -> tuple[list[str], list[str]]:
         else:
             github_token = os.getenv('GITHUB_TOKEN')
             headers = {}
-            # If token is provided, use it for private repo access
+            # if token is provided, use it for private repo access
             if github_token:
                 headers = {
                     "Authorization": f"token {github_token}",
@@ -119,16 +119,21 @@ def format_bytes(bytes_value: int) -> str:
 def parse_traffic_from_userinfo(userinfo: str) -> str:
     '''
     Parse subscription-userinfo header and return formatted traffic string.
-    Example input: 'upload=235205700; download=1883111384; total=0; expire=0'
-    Example output: '↑235.21MB ↓1.88GB'
     '''
     try:
         parts = dict(item.split('=') for item in userinfo.split('; '))
         download = int(parts.get('download', 0))
+        total = int(parts.get('total', 0))
         
         download_str = format_bytes(download)
         
-        return f"↓{download_str}"
+        if total > 0:
+            total_str = format_bytes(total)
+            return f"{download_str}/{total_str}"
+        else:
+            # unlimited traffic
+            return f"{download_str}/♾️"
+            
     except Exception as e:
         logger.warning(f"Failed to parse userinfo: {e}")
         return ""
@@ -150,7 +155,11 @@ def clean_link_name(link: str, traffic_suffix: str = "") -> str:
         logger.info(f"Before cleaning: {decoded_fragment}")
         
         # remove email pattern
-        cleaned = re.sub(r'-[a-zA-Z0-9]+(?:-[\dDHM,]+)?(?:⏳|⌛)?$', '', decoded_fragment)
+        cleaned = re.sub(
+          r'-[a-zA-Z0-9]{16}(?:-[^⏳\s]+)*?\s*(?=-[\dDHM,]+⏳|\s*$)',
+          '',
+          decoded_fragment
+        )
 
         if traffic_suffix:
             cleaned = f"{cleaned} {traffic_suffix}"
@@ -185,11 +194,11 @@ async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -
         # extract content and headers
         data_with_headers = [(content, headers) for content, headers in valid_results] if valid_results else []
 
-        # merge subscription metadata from first available source (for global headers)
+        # merge subscription metadata from first available source
         merged_headers = {}
         if data_with_headers:
             first_headers = data_with_headers[0][1]
-            for key in ['subscription-userinfo', 'profile-update-interval', 'profile-web-page-url']:
+            for key in ['profile-update-interval', 'profile-web-page-url']:
                 if key in first_headers:
                     merged_headers[key] = first_headers[key]
 
@@ -199,14 +208,13 @@ async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -
             traffic_suffix = ""
             if 'subscription-userinfo' in headers:
                 traffic_suffix = parse_traffic_from_userinfo(headers['subscription-userinfo'])
-            
+
             lines = content.decode('utf-8').splitlines()
             cleaned_lines = [clean_link_name(line, traffic_suffix) for line in lines]
             cleaned_data.append('\n'.join(cleaned_lines).encode('utf-8'))
 
-
+        # vless links without traffic info
         vless_traffic_suffix = ""
-        
         cleaned_vless = [clean_link_name(link, vless_traffic_suffix).encode() for link in vless_links]
 
         # merge content
