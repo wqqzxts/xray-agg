@@ -6,6 +6,8 @@ import logging.handlers
 from asyncio import gather
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response, HTTPException
+import re
+from urllib.parse import unquote, quote
 
 
 # logging configuration with rotation every 3 days
@@ -103,6 +105,31 @@ async def fetch_subscription(
         logger.warning(f"Can't get subscription from {sub_link}{sub_id}: {str(e)}")
         return None
 
+def clean_link_name(link: str) -> str:
+    '''
+    Remove email suffix from VLESS/VMess/Trojan link fragments.
+    Keeps emoji and inbound name, removes the email part.
+    '''
+    try:
+        # find the fragment (after #)
+        hash_idx = link.rfind('#')
+        if hash_idx == -1:
+            return link
+        
+        fragment = link[hash_idx + 1:]
+        decoded_fragment = unquote(fragment)
+        
+        # remove email pattern: "-emailpart" at the end
+        cleaned = re.sub(r'-[a-zA-Z0-9@.]+$', '', decoded_fragment)
+        
+        # re-encode and rebuild the link
+        encoded_fragment = quote(cleaned, safe='')
+        return link[:hash_idx + 1] + encoded_fragment
+        
+    except Exception as e:
+        logger.warning(f"Failed to clean link name: {e}")
+        return link
+
 async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -> tuple[bytes, dict]:
     '''
     Returns (merged_content, merged_headers)
@@ -132,10 +159,19 @@ async def merge_all(sub_links: list[str], vless_links: list[str], sub_id: str) -
                 if key in first_headers:
                     merged_headers[key] = first_headers[key]
 
+        # clean email from profile
+        cleaned_data = []
+        for content in data:
+            lines = content.decode('utf-8').splitlines()
+            cleaned_lines = [clean_link_name(line) for line in lines]
+            cleaned_data.append('\n'.join(cleaned_lines).encode('utf-8'))
+        
+        # clean vless links
+        cleaned_vless = [clean_link_name(link).encode() for link in vless_links]
+
         # merge content
-        encoded_vless_links = [link.encode() for link in vless_links]
-        merged_subs = b'\n'.join(data) if data else b''
-        merged_configs = b'\n'.join(encoded_vless_links)
+        merged_subs = b'\n'.join(cleaned_data) if cleaned_data else b''
+        merged_configs = b'\n'.join(cleaned_vless)
 
         return merged_subs + merged_configs, merged_headers
 
